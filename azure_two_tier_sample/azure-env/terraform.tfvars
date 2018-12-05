@@ -1,0 +1,8 @@
+FirewallDnsName = "pan-test03"
+FirewallVmName = "pan-test03"
+FirewallVmSize = "Standard_D3_v2"
+WebDnsName = "web-pan-test01"
+FromGatewayLogin = "0.0.0.0/0"
+StorageAccountName = "panostestunique"
+location = "eastus2"
+resource_group_name = "rg-pan-test"

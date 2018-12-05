@@ -6,13 +6,36 @@ resource "azurerm_resource_group" "PAN_FW_RG" {
 }
 
 resource "azurerm_storage_account" "PAN_FW_STG_AC" {
+  depends_on = ["azurerm_resource_group.PAN_FW_RG"]
   name = "${join("", list(var.StorageAccountName, substr(md5(azurerm_resource_group.PAN_FW_RG.id), 0, 4)))}"
   resource_group_name = "${azurerm_resource_group.PAN_FW_RG.name}"
   location = "${var.location}"
-  account_type = "${var.storageAccountType}"
-  account_replication_type = "LRS"
-  account_tier = "Standard" 
+  account_tier = "${var.storageAccountTier}"
+  account_replication_type = "${var.storageAccountReplicationType}"
 }
+
+# resource "azurerm_storage_container" "PAN_FW_STG_CON" {
+#   name = "config"
+#   resource_group_name = "${azurerm_resource_group.PAN_FW_RG.name}"
+#   storage_account_name = "${azurerm_storage_account.PAN_FW_STG_AC.name}"
+#   container_access_type = "blob"
+# }
+
+# resource "azurerm_storage_blob" "PAN_FW_DEFAULT_CONFIG" {
+#   name = "paloaltoazure.xml"
+#   source = "palo_config/paloaltoazure.xml"
+#   resource_group_name = "${azurerm_resource_group.PAN_FW_RG.name}"
+#   storage_account_name = "${azurerm_storage_account.PAN_FW_STG_AC.name}"
+#   storage_container_name = "${azurerm_storage_container.PAN_FW_STG_CON.name}"
+# }
+
+# resource "azurerm_storage_blob" "PAN_FW_CONFIG_SCRIPT" {
+#   name = "config-fw.py"
+#   source = "config-fw.py"
+#   resource_group_name = "${azurerm_resource_group.PAN_FW_RG.name}"
+#   storage_account_name = "${azurerm_storage_account.PAN_FW_STG_AC.name}"
+#   storage_container_name = "${azurerm_storage_container.PAN_FW_STG_CON.name}"
+# }
 
 resource "azurerm_public_ip" "PublicIP_0" {
   name = "${var.fwpublicIPName}"
@@ -27,7 +50,7 @@ resource "azurerm_public_ip" "PublicIP_1" {
   location = "${var.location}"
   resource_group_name = "${azurerm_resource_group.PAN_FW_RG.name}"
   public_ip_address_allocation = "${var.publicIPAddressType}"
-  domain_name_label = "${join("", list(var.WebServerDnsName, substr(md5(azurerm_resource_group.PAN_FW_RG.id), 0, 4)))}"
+  domain_name_label = "${join("", list(var.WebDnsName, substr(md5(azurerm_resource_group.PAN_FW_RG.id), 0, 4)))}"
 }
 
 resource "azurerm_network_security_group" "PAN_FW_NSG" {
@@ -60,7 +83,7 @@ resource "azurerm_network_security_group" "PAN_FW_NSG" {
   }
 
   security_rule {
-    name                       = "Deafult-Deny"
+    name                       = "Default-Deny"
     priority                   = 200
     direction                  = "Inbound"
     access                     = "Deny"
@@ -112,6 +135,27 @@ resource "azurerm_network_security_group" "PAN_FW_NSG" {
   }
 }
 
+resource "azurerm_subnet_network_security_group_association" "PAN_FW_NSG_ASSO_SUB0" {
+  depends_on = ["azurerm_network_security_group.PAN_FW_NSG",
+                "azurerm_subnet.PAN_FW_Subnet0"]
+  subnet_id                 = "${azurerm_subnet.PAN_FW_Subnet0.id}"
+  network_security_group_id = "${azurerm_network_security_group.PAN_FW_NSG.id}"
+}
+
+resource "azurerm_subnet_network_security_group_association" "PAN_FW_NSG_ASSO_SUB1" {
+  depends_on = ["azurerm_network_security_group.PAN_FW_NSG",
+                "azurerm_subnet.PAN_FW_Subnet1"]
+  subnet_id                 = "${azurerm_subnet.PAN_FW_Subnet1.id}"
+  network_security_group_id = "${azurerm_network_security_group.PAN_FW_NSG.id}"
+}
+
+resource "azurerm_subnet_route_table_association" "PAN_FW_ROUTE_TRUST_ASSO" {
+  depends_on = ["azurerm_subnet.PAN_FW_Subnet2",
+              "azurerm_route_table.PAN_FW_RT_Trust"]
+  subnet_id = "${azurerm_subnet.PAN_FW_Subnet2.id}"
+  route_table_id = "${azurerm_route_table.PAN_FW_RT_Trust.id}"
+}
+
 resource "azurerm_route_table" "PAN_FW_RT_Trust" {
   name                = "${var.routeTableTrust}"
   location            = "${var.location}"
@@ -134,12 +178,12 @@ resource "azurerm_route_table" "PAN_FW_RT_Web" {
   location            = "${var.location}"
   resource_group_name = "${azurerm_resource_group.PAN_FW_RG.name}"
 
-  route {
-    name           = "Web-to-Firewall-DB"
-    address_prefix = "${join("", list(var.IPAddressPrefix, ".4.0/24"))}"
-    next_hop_type  = "VirtualAppliance"
-    next_hop_in_ip_address = "${join("", list(var.IPAddressPrefix, ".2.4"))}"
-  }
+  # route {
+  #   name           = "Web-to-Firewall-DB"
+  #   address_prefix = "${join("", list(var.IPAddressPrefix, ".4.0/24"))}"
+  #   next_hop_type  = "VirtualAppliance"
+  #   next_hop_in_ip_address = "${join("", list(var.IPAddressPrefix, ".2.4"))}"
+  # }
 
   route {
     name           = "Web-default-route"
@@ -153,29 +197,37 @@ resource "azurerm_route_table" "PAN_FW_RT_Web" {
   }
 }
 
-resource "azurerm_route_table" "PAN_FW_RT_DB" {
-  name                = "${var.routeTableDB}"
-  location            = "${var.location}"
-  resource_group_name = "${azurerm_resource_group.PAN_FW_RG.name}"
+resource "azurerm_subnet_route_table_association" "PAN_FW_ROUTE_WEB_ASSO" {
+  depends_on = ["azurerm_subnet.PAN_FW_Subnet3",
+                "azurerm_route_table.PAN_FW_RT_Web"]
 
-  route {
-    name           = "DB-to-Firewall-Web"
-    address_prefix = "${join("", list(var.IPAddressPrefix, ".3.0/24"))}"
-    next_hop_type  = "VirtualAppliance"
-    next_hop_in_ip_address = "${join("", list(var.IPAddressPrefix, ".2.4"))}"
-  }
-
-  route {
-    name           = "DB-default-route"
-    address_prefix = "0.0.0.0/0"
-    next_hop_type  = "VirtualAppliance"
-    next_hop_in_ip_address = "${join("", list(var.IPAddressPrefix, ".2.4"))}"
-  }
-
-  tags {
-    environment = "Production"
-  }
+  subnet_id = "${azurerm_subnet.PAN_FW_Subnet3.id}"
+  route_table_id = "${azurerm_route_table.PAN_FW_RT_Web.id}"
 }
+
+# resource "azurerm_route_table" "PAN_FW_RT_DB" {
+#   name                = "${var.routeTableDB}"
+#   location            = "${var.location}"
+#   resource_group_name = "${azurerm_resource_group.PAN_FW_RG.name}"
+
+#   route {
+#     name           = "DB-to-Firewall-Web"
+#     address_prefix = "${join("", list(var.IPAddressPrefix, ".3.0/24"))}"
+#     next_hop_type  = "VirtualAppliance"
+#     next_hop_in_ip_address = "${join("", list(var.IPAddressPrefix, ".2.4"))}"
+#   }
+
+#   route {
+#     name           = "DB-default-route"
+#     address_prefix = "0.0.0.0/0"
+#     next_hop_type  = "VirtualAppliance"
+#     next_hop_in_ip_address = "${join("", list(var.IPAddressPrefix, ".2.4"))}"
+#   }
+
+#   tags {
+#     environment = "Production"
+#   }
+# }
 
 resource "azurerm_virtual_network" "PAN_FW_VNET" {
   name                = "${join("", list(var.vnetName, substr(md5(azurerm_resource_group.PAN_FW_RG.id), 0, 4)))}"
@@ -192,7 +244,7 @@ resource "azurerm_subnet" "PAN_FW_Subnet0" {
   name           = "${var.subnet0Name}"
   resource_group_name = "${azurerm_resource_group.PAN_FW_RG.name}"
   address_prefix = "${join("", list(var.IPAddressPrefix, ".0.0/24"))}"
-  network_security_group_id = "${azurerm_network_security_group.PAN_FW_NSG.id}"
+  # network_security_group_id = "${azurerm_network_security_group.PAN_FW_NSG.id}"
   virtual_network_name = "${azurerm_virtual_network.PAN_FW_VNET.name}"
 }
 
@@ -200,7 +252,7 @@ resource "azurerm_subnet" "PAN_FW_Subnet1" {
   name           = "${var.subnet1Name}"
   resource_group_name = "${azurerm_resource_group.PAN_FW_RG.name}"
   address_prefix = "${join("", list(var.IPAddressPrefix, ".1.0/24"))}"
-  network_security_group_id = "${azurerm_network_security_group.PAN_FW_NSG.id}"
+  # network_security_group_id = "${azurerm_network_security_group.PAN_FW_NSG.id}"
   virtual_network_name = "${azurerm_virtual_network.PAN_FW_VNET.name}"
 }
 
@@ -209,23 +261,25 @@ resource "azurerm_subnet" "PAN_FW_Subnet3" {
   resource_group_name = "${azurerm_resource_group.PAN_FW_RG.name}"
   address_prefix = "${join("", list(var.IPAddressPrefix, ".3.0/24"))}"
   virtual_network_name = "${azurerm_virtual_network.PAN_FW_VNET.name}"
+  # service_endpoints = ["Microsoft.Storage"] #TODO Not going to fully experiment with this yet.
 }
 
-resource "azurerm_subnet" "PAN_FW_Subnet4" {
-  name           = "${var.subnet4Name}"
-  resource_group_name = "${azurerm_resource_group.PAN_FW_RG.name}"
-  address_prefix = "${join("", list(var.IPAddressPrefix, ".4.0/24"))}"
-  virtual_network_name = "${azurerm_virtual_network.PAN_FW_VNET.name}"
-}
+# resource "azurerm_subnet" "PAN_FW_Subnet4" {
+#   name           = "${var.subnet4Name}"
+#   resource_group_name = "${azurerm_resource_group.PAN_FW_RG.name}"
+#   address_prefix = "${join("", list(var.IPAddressPrefix, ".4.0/24"))}"
+#   virtual_network_name = "${azurerm_virtual_network.PAN_FW_VNET.name}"
+# }
 
 resource "azurerm_subnet" "PAN_FW_Subnet2" {
   name           = "${var.subnet2Name}"
   resource_group_name = "${azurerm_resource_group.PAN_FW_RG.name}"
   address_prefix = "${join("", list(var.IPAddressPrefix, ".2.0/24"))}"
-  route_table_id = "${azurerm_route_table.PAN_FW_RT_Trust.id}"
+  # route_table_id = "${azurerm_route_table.PAN_FW_RT_Trust.id}"
   virtual_network_name = "${azurerm_virtual_network.PAN_FW_VNET.name}"
 }
 
+# Management interface
 resource "azurerm_network_interface" "VNIC0" {
   name                = "${join("", list("FW", var.nicName, "0"))}"
   location            = "${var.location}"
@@ -246,6 +300,7 @@ resource "azurerm_network_interface" "VNIC0" {
   }
 }
 
+# Public Interface
 resource "azurerm_network_interface" "VNIC1" {
   name                = "${join("", list("FW", var.nicName, "1"))}"
   location            = "${var.location}"
@@ -266,6 +321,7 @@ resource "azurerm_network_interface" "VNIC1" {
   }
 }
 
+# Trusted interface
 resource "azurerm_network_interface" "VNIC2" {
   name                = "${join("", list("FW", var.nicName, "2"))}"
   location            = "${var.location}"
@@ -282,6 +338,59 @@ resource "azurerm_network_interface" "VNIC2" {
 
   tags {
     displayName = "${join("", list("NetworkInterfaces", "2"))}"
+  }
+}
+
+resource "azurerm_virtual_machine" "PAN_FW_FW" {
+  name                  = "${var.FirewallVmName}"
+  location              = "${var.location}"
+  resource_group_name   = "${azurerm_resource_group.PAN_FW_RG.name}"
+  vm_size               = "${var.FirewallVmSize}"
+
+  depends_on = [
+                "azurerm_network_interface.VNIC0",
+                "azurerm_network_interface.VNIC1",
+                "azurerm_network_interface.VNIC2"
+                ]
+  plan {
+    name = "${var.fwSku}"
+    publisher = "${var.fwPublisher}"
+    product = "${var.fwOffer}"
+  }
+
+  storage_image_reference {
+    publisher = "${var.fwPublisher}"
+    offer     = "${var.fwOffer}"
+    sku       = "${var.fwSku}"
+    version   = "latest"
+  }
+
+  storage_os_disk {
+    name          = "${join("", list(var.FirewallVmName, "-osDisk"))}"
+    managed_disk_type = "Standard_LRS"
+    caching       = "ReadWrite"
+    create_option = "FromImage"
+  }
+
+  boot_diagnostics {
+    enabled = true
+    storage_uri = "${azurerm_storage_account.PAN_FW_STG_AC.primary_blob_endpoint}"
+  }
+
+  os_profile {
+    computer_name  = "${var.FirewallVmName}"
+    admin_username = "${var.adminUsername}"
+    admin_password = "${var.adminPassword}"
+  }
+
+  primary_network_interface_id = "${azurerm_network_interface.VNIC0.id}"
+  network_interface_ids = ["${azurerm_network_interface.VNIC0.id}",
+                           "${azurerm_network_interface.VNIC1.id}",
+                           "${azurerm_network_interface.VNIC2.id}",
+                          ]
+
+  os_profile_linux_config {
+    disable_password_authentication = false
   }
 }
 
@@ -303,80 +412,19 @@ resource "azurerm_network_interface" "VNIC0_Web" {
   }
 }
 
-resource "azurerm_network_interface" "VNIC0_DB" {
-  name                = "${join("", list("DB", var.nicName, "0"))}"
-  location            = "${var.location}"
-  resource_group_name = "${azurerm_resource_group.PAN_FW_RG.name}"
-  depends_on          = ["azurerm_virtual_network.PAN_FW_VNET"]
-
-  ip_configuration {
-    name                          = "${join("", list("ipconfig", "4"))}"
-    subnet_id                     = "${azurerm_subnet.PAN_FW_Subnet4.id}"
-    private_ip_address_allocation = "static"
-    private_ip_address = "${join("", list(var.IPAddressPrefix, ".4.5"))}"
-  }
-
-  tags {
-    displayName = "${join("", list("NetworkInterfaces", "4"))}"
-  }
-}
-
-
-resource "azurerm_virtual_machine" "PAN_FW_FW" {
-  name                  = "${var.FirewallVmName}"
-  location              = "${var.location}"
-  resource_group_name   = "${azurerm_resource_group.PAN_FW_RG.name}"
-  vm_size               = "${var.FirewallVmSize}"
-
-  depends_on = ["azurerm_network_interface.VNIC0",
-                "azurerm_network_interface.VNIC1",
-                "azurerm_network_interface.VNIC2"
-                ]
-  plan {
-    name = "${var.fwSku}"
-    publisher = "${var.fwPublisher}"
-    product = "${var.fwOffer}"
-  }
-
-  storage_image_reference {
-    publisher = "${var.fwPublisher}"
-    offer     = "${var.fwOffer}"
-    sku       = "${var.fwSku}"
-    version   = "latest"
-  }
-
-  storage_os_disk {
-    name          = "${join("", list(var.FirewallVmName, "-osDisk"))}"
-    vhd_uri       = "${azurerm_storage_account.PAN_FW_STG_AC.primary_blob_endpoint}vhds/${var.FirewallVmName}-${var.fwOffer}-${var.fwSku}.vhd"
-    caching       = "ReadWrite"
-    create_option = "FromImage"
-  }
-
-  os_profile {
-    computer_name  = "${var.FirewallVmName}"
-    admin_username = "${var.adminUsername}"
-    admin_password = "${var.adminPassword}"
-  }
-
-  primary_network_interface_id = "${azurerm_network_interface.VNIC0.id}"
-  network_interface_ids = ["${azurerm_network_interface.VNIC0.id}",
-                           "${azurerm_network_interface.VNIC1.id}",
-                           "${azurerm_network_interface.VNIC2.id}",
-                          ]
-
-  os_profile_linux_config {
-    disable_password_authentication = false
-  }
-}
-
 resource "azurerm_virtual_machine" "PAN_FW_Web" {
   name                  = "${var.web-vm-name}"
   location              = "${var.location}"
   resource_group_name   = "${azurerm_resource_group.PAN_FW_RG.name}"
   vm_size               = "${var.gvmSize}"
 
-  depends_on = ["azurerm_network_interface.VNIC0", "azurerm_network_interface.VNIC1",
-                  "azurerm_network_interface.VNIC2"]
+  depends_on = ["azurerm_network_interface.VNIC0",
+                "azurerm_network_interface.VNIC1",
+                "azurerm_network_interface.VNIC2",
+                "azurerm_subnet_route_table_association.PAN_FW_ROUTE_WEB_ASSO",
+                "azurerm_subnet_network_security_group_association.PAN_FW_NSG_ASSO_SUB0",
+                "azurerm_subnet_network_security_group_association.PAN_FW_NSG_ASSO_SUB1",
+                "azurerm_subnet_route_table_association.PAN_FW_ROUTE_TRUST_ASSO"]
 
   storage_image_reference {
     publisher = "${var.imagePublisher}"
@@ -387,9 +435,14 @@ resource "azurerm_virtual_machine" "PAN_FW_Web" {
 
   storage_os_disk {
     name          = "web-osdisk"
-    vhd_uri       = "${azurerm_storage_account.PAN_FW_STG_AC.primary_blob_endpoint}vhds/osdisk-Web.vhd"
+    managed_disk_type = "Standard_LRS"
     caching       = "ReadWrite"
     create_option = "FromImage"
+  }
+
+  boot_diagnostics {
+    enabled = true
+    storage_uri = "${azurerm_storage_account.PAN_FW_STG_AC.primary_blob_endpoint}"
   }
 
   os_profile {
@@ -409,209 +462,75 @@ resource "azurerm_virtual_machine" "PAN_FW_Web" {
   }
 }
 
-resource "azurerm_virtual_machine" "PAN_FW_DB" {
-  name                  = "${var.db-vm-name}"
-  location              = "${var.location}"
-  resource_group_name   = "${azurerm_resource_group.PAN_FW_RG.name}"
-  vm_size               = "${var.gvmSize}"
+# resource "azurerm_virtual_machine_extension" "PAN_FW_WEB_EXT_MIN" {
+#   depends_on = ["azurerm_public_ip.PublicIP_1"]
+#   name                 = "web-vm-customscript"
+#   location             = "${var.location}"
+#   resource_group_name  = "${azurerm_resource_group.PAN_FW_RG.name}"
+#   virtual_machine_name = "${azurerm_virtual_machine.PAN_FW_Web.name}"
+#   publisher            = "Microsoft.Azure.Extensions"
+#   type                 = "CustomScript"
+#   type_handler_version = "2.0"
 
-  depends_on = ["azurerm_network_interface.VNIC0", "azurerm_network_interface.VNIC1",
-                  "azurerm_network_interface.VNIC2", "azurerm_network_interface.VNIC0_DB"]
+#   settings = <<SETTINGS
+#     {
+#       "fileUris": ["${azurerm_storage_blob.PAN_FW_CONFIG_SCRIPT.url}"],
+#       "commandToExecute": "python config-fw.py ${azurerm_storage_blob.PAN_FW_DEFAULT_CONFIG.url}"
+#     }
+# SETTINGS
+# }
 
-  storage_image_reference {
-    publisher = "${var.imagePublisher}"
-    offer     = "${var.imageOffer}"
-    sku       = "${var.ubuntuOSVersion}"
-    version   = "latest"
-  }
+# resource "azurerm_template_deployment" "WeblinkedTemplate" {
+#   name                = "WeblinkedTemplate"
+#   resource_group_name = "${azurerm_resource_group.PAN_FW_RG.name}"
 
-  storage_os_disk {
-    name          = "web-osdisk"
-    vhd_uri       = "${azurerm_storage_account.PAN_FW_STG_AC.primary_blob_endpoint}vhds/osdisk-DB.vhd"
-    caching       = "ReadWrite"
-    create_option = "FromImage"
-  }
+  # depends_on = [
+  #   "azurerm_template_deployment.DBlinkedTemplate"
+  # ]
+#   parameters {
+#     name = "${azurerm_virtual_network.PAN_FW_VNET.name}/${azurerm_subnet.PAN_FW_Subnet3.name}"
+#     location = "${var.location}"
+#     subnet3Prefix = "${join("", list(var.IPAddressPrefix, ".3.0/24"))}"
+#     route_table_id = "${azurerm_route_table.PAN_FW_RT_Web.id}"
+#   }
 
-  os_profile {
-    computer_name  = "database-vm"
-    admin_username = "${var.adminUsername}"
-    admin_password = "${var.adminPassword}"
-  }
+#   template_body = <<DEPLOY
+#   {
+#       "$schema": "https://schema.management.azure.com/schemas/2015-01-01/deploymentTemplate.json#",
+#       "contentVersion": "1.0.0.0",
+#       "parameters": {
+#         "name": {
+#           "type": "string"
+#         },
+#         "location": {
+#           "type": "string"
+#         },
+#         "subnet3Prefix": {
+#           "type": "string"
+#         },
+#         "route_table_id": {
+#           "type": "string"
+#         }
+#       },
+#       "resources": [
+#            {
+#               "apiVersion": "2015-05-01-preview",
+#               "type": "Microsoft.Network/virtualNetworks/subnets",
+#               "name": "[parameters('name')]",
+#               "location": "[parameters('location')]",
+#               "properties": {
+#                 "mode": "Incremental",
+#                 "addressPrefix": "[parameters('subnet3Prefix')]",
+#               "routeTable": {
+#                  "id": "[parameters('route_table_id')]"
+#                   }
+#               }
+#           }]
+#   }
+# DEPLOY
 
-  network_interface_ids = ["${azurerm_network_interface.VNIC0_DB.id}"]
-
-  tags {
-    environment = "staging"
-  }
-
-  os_profile_linux_config {
-    disable_password_authentication = false
-  }
-}
-
-resource "azurerm_virtual_machine_extension" "PAN_FW_DB_EXT" {
-  name                 = "db-vm-customscript"
-  location             = "${var.location}"
-  resource_group_name  = "${azurerm_resource_group.PAN_FW_RG.name}"
-  virtual_machine_name = "${azurerm_virtual_machine.PAN_FW_DB.name}"
-  publisher            = "Microsoft.Azure.Extensions"
-  type                 = "CustomScript"
-  type_handler_version = "2.0"
-
-  settings = <<SETTINGS
-{
-  "fileUris": ["https://raw.githubusercontent.com/PaloAltoNetworks/azure/master/two-tier-sample/config_mysql.py"],
-  "commandToExecute": "python config_mysql.py"
-}
-SETTINGS
-}
-
-/*
-resource "azurerm_virtual_machine_extension" "PAN_FW_WEB_EXT" {
-  count = 0
-  name                 = "web-vm-customscript"
-  location             = "${var.location}"
-  resource_group_name  = "${azurerm_resource_group.PAN_FW_RG.name}"
-  virtual_machine_name = "${azurerm_virtual_machine.PAN_FW_Web.name}"
-  publisher            = "Microsoft.Azure.Extensions"
-  type                 = "CustomScript"
-  type_handler_version = "2.0"
-
-  settings = <<SETTINGS
-    {
-      "fileUris": ["https://raw.githubusercontent.com/PaloAltoNetworks/azure/master/two-tier-sample/config-fw.py"],
-      "commandToExecute": "python config-fw.py ${azurerm_public_ip.PublicIP_1.fqdn}"
-    }
-SETTINGS
-} */
-
-resource "azurerm_virtual_machine_extension" "PAN_FW_WEB_EXT_MIN" {
-  name                 = "web-vm-customscript"
-  location             = "${var.location}"
-  resource_group_name  = "${azurerm_resource_group.PAN_FW_RG.name}"
-  virtual_machine_name = "${azurerm_virtual_machine.PAN_FW_Web.name}"
-  publisher            = "Microsoft.Azure.Extensions"
-  type                 = "CustomScript"
-  type_handler_version = "2.0"
-
-  settings = <<SETTINGS
-    {
-      "fileUris": ["https://gist.githubusercontent.com/vinayvenkat/43e7f613a23152e22f5b3b1c960fd17c/raw/ce2f82e211377e8924f0777ba06d83558ece9441/config-fw.py"],
-      "commandToExecute": "python config-fw.py ${azurerm_public_ip.PublicIP_1.fqdn}"
-    }
-SETTINGS
-}
-
-resource "azurerm_template_deployment" "DBlinkedTemplate" {
-  name                = "DBlinkedTemplate"
-  resource_group_name = "${azurerm_resource_group.PAN_FW_RG.name}"
-
-  depends_on = [
-    "azurerm_virtual_machine_extension.PAN_FW_DB_EXT",
-    "azurerm_virtual_machine_extension.PAN_FW_WEB_EXT_MIN",
-    "azurerm_virtual_network.PAN_FW_VNET",
-    "azurerm_network_interface.VNIC0_DB",
-    "azurerm_network_interface.VNIC0_Web",
-    "azurerm_route_table.PAN_FW_RT_Web",
-    "azurerm_route_table.PAN_FW_RT_DB"
-  ]
-  parameters {
-    name = "${azurerm_virtual_network.PAN_FW_VNET.name}/${azurerm_subnet.PAN_FW_Subnet4.name}"
-    location = "${var.location}"
-    subnet4Prefix = "${join("", list(var.IPAddressPrefix, ".4.0/24"))}"
-    route_table_id = "${azurerm_route_table.PAN_FW_RT_DB.id}"
-  }
-
-  template_body = <<DEPLOY
-  {
-      "$schema": "https://schema.management.azure.com/schemas/2015-01-01/deploymentTemplate.json#",
-      "contentVersion": "1.0.0.0",
-      "parameters": {
-        "name": {
-          "type": "string"
-        },
-        "location": {
-          "type": "string"
-        },
-        "subnet4Prefix": {
-          "type": "string"
-        },
-        "route_table_id": {
-          "type": "string"
-        }
-      },
-      "resources": [
-           {
-              "apiVersion": "2015-05-01-preview",
-              "type": "Microsoft.Network/virtualNetworks/subnets",
-              "name": "[parameters('name')]",
-              "location": "[parameters('location')]",
-              "properties": {
-                "mode": "Incremental",
-                "addressPrefix": "[parameters('subnet4Prefix')]",
-              "routeTable": {
-                 "id": "[parameters('route_table_id')]"
-                  }
-              }
-          }]
-  }
-DEPLOY
-
-  deployment_mode = "Incremental"
-}
-
-resource "azurerm_template_deployment" "WeblinkedTemplate" {
-  name                = "WeblinkedTemplate"
-  resource_group_name = "${azurerm_resource_group.PAN_FW_RG.name}"
-
-  depends_on = [
-    "azurerm_template_deployment.DBlinkedTemplate"
-  ]
-  parameters {
-    name = "${azurerm_virtual_network.PAN_FW_VNET.name}/${azurerm_subnet.PAN_FW_Subnet3.name}"
-    location = "${var.location}"
-    subnet3Prefix = "${join("", list(var.IPAddressPrefix, ".3.0/24"))}"
-    route_table_id = "${azurerm_route_table.PAN_FW_RT_Web.id}"
-  }
-
-  template_body = <<DEPLOY
-  {
-      "$schema": "https://schema.management.azure.com/schemas/2015-01-01/deploymentTemplate.json#",
-      "contentVersion": "1.0.0.0",
-      "parameters": {
-        "name": {
-          "type": "string"
-        },
-        "location": {
-          "type": "string"
-        },
-        "subnet3Prefix": {
-          "type": "string"
-        },
-        "route_table_id": {
-          "type": "string"
-        }
-      },
-      "resources": [
-           {
-              "apiVersion": "2015-05-01-preview",
-              "type": "Microsoft.Network/virtualNetworks/subnets",
-              "name": "[parameters('name')]",
-              "location": "[parameters('location')]",
-              "properties": {
-                "mode": "Incremental",
-                "addressPrefix": "[parameters('subnet3Prefix')]",
-              "routeTable": {
-                 "id": "[parameters('route_table_id')]"
-                  }
-              }
-          }]
-  }
-DEPLOY
-
-  deployment_mode = "Incremental"
-}
-
+#   deployment_mode = "Incremental"
+# }
 output "FirewallIP" {
   value = "${join("", list("https://", "${azurerm_public_ip.PublicIP_0.ip_address}"))}"
 }
@@ -622,8 +541,4 @@ output "FirewallFQDN" {
 
 output "WebIP" {
   value = "${join("", list("http://", "${azurerm_public_ip.PublicIP_1.ip_address}"))}"
-}
-
-output "WebFQDN" {
-  value = "${join("", list("http://", "${azurerm_public_ip.PublicIP_1.fqdn}"))}"
 }

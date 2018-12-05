@@ -3,17 +3,21 @@ variable "location" {}
 
 variable "StorageAccountName" {}
 variable "FirewallDnsName" {}
-variable "WebServerDnsName" {}
 variable "FirewallVmName" {}
 variable "FirewallVmSize" {}
 variable "FromGatewayLogin" {}
+variable "WebDnsName" {}
 
-variable "storageAccountType" {
-  default = "Standard_LRS"
+variable "storageAccountTier" {
+  default = "Standard"
+}
+
+variable "storageAccountReplicationType" {
+  default = "LRS"
 }
 
 variable "fwpublicIPName" {
-  default = "fwPublicIP"
+  default = "fwMgmtPublicIP"
 }
 
 variable "publicIPAddressType" {
@@ -32,9 +36,9 @@ variable "routeTableWeb" {
   default = "Web-to-FW"
 }
 
-variable "routeTableDB" {
-  default = "DB-to-FW"
-}
+# variable "routeTableDB" {
+#   default = "DB-to-FW"
+# }
 
 variable "routeTableTrust" {
   default = "Trust-to-intranetwork"
@@ -60,9 +64,9 @@ variable "subnet3Name" {
   default = "Web"
 }
 
-variable "subnet4Name" {
-  default = "DB"
-}
+# variable "subnet4Name" {
+#   default = "DB"
+# }
 
 # Note internally there is an assumption
 # for the two NSG to have the same name!
@@ -79,7 +83,7 @@ variable "nicName" {
 }
 
 variable "fwSku" {
-  default = "bundle2"
+  default = "byol"
 }
 
 variable "fwOffer" {
